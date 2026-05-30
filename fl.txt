@@ -1,0 +1,1573 @@
+print("PhantomXPro - Flick Edition")
+
+local success, result = pcall(function()
+    local source = game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua", true)
+    if source then
+        local loaded = loadstring(source)
+        if loaded then return loaded() end
+    end
+    return nil
+end)
+
+if not (success and result) then
+    print("Failed to load WindUI")
+    return
+end
+
+local WindUI = result
+
+-- ══════════════════════════════════════════
+--              SERVICES
+-- ══════════════════════════════════════════
+local RunService        = game:GetService("RunService")
+local Players           = game:GetService("Players")
+local UserInputService  = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Camera            = workspace.CurrentCamera
+local LocalPlayer       = Players.LocalPlayer
+
+-- ══════════════════════════════════════════
+--              VARIABLES
+-- ══════════════════════════════════════════
+local currentwalkspeed      = 16
+local xrayenabled           = false
+local xraytransparency      = 0.6
+local originaltransparencies= {}
+local noVelocityEnabled     = false
+local noVelocityConnection  = nil
+local bunnyHopEnabled       = false
+local bunnyHopDelay         = 1
+local bunnyHopConnection    = nil
+
+local originallighting = {
+    Brightness     = game.Lighting.Brightness,
+    Ambient        = game.Lighting.Ambient,
+    OutdoorAmbient = game.Lighting.OutdoorAmbient,
+    FogEnd         = game.Lighting.FogEnd,
+    FogStart       = game.Lighting.FogStart
+}
+
+-- ESP
+local espenabled        = false
+local outlineenabled    = false
+local tracersenabled    = false
+local skeletonenabled   = false
+local espobjects        = {}
+local activehighlights  = {}
+local playerconnections = {}
+local tracerlines       = {}
+local skeletonlines     = {}
+local shieldedPlayers   = {}
+
+local espconfig = {
+    espcolor              = Color3.fromRGB(255,255,255),
+    outlinecolor          = Color3.fromRGB(255,255,255),
+    outlinefillcolor      = Color3.fromRGB(255,255,255),
+    tracercolor           = Color3.fromRGB(255,255,255),
+    skeletoncolor         = Color3.fromRGB(255,255,255),
+    espsize               = 16,
+    tracersize            = 2,
+    outlinetransparency   = 0,
+    outlinefilltransparency = 1,
+    rainbowesp            = false,
+    rainbowoutline        = false,
+    rainbowtracers        = false,
+    rainbowskeleton       = false,
+    rainbowspeed          = 5,
+    tracerposition        = "Bottom"
+}
+
+-- Aimlock
+local rainbowhue            = 0
+local lastupdate            = 0
+local aimlockenabled        = false
+local smoothaimlock         = false
+local aimlocktype           = "Nearest Player"
+local aimpart               = "Head"
+local fovenabled            = false
+local showfov               = false
+local fovsize               = 100
+local fovcolor              = Color3.fromRGB(255,255,255)
+local fovgui                = nil
+local fovframe              = nil
+local fovstroke             = nil
+local fovstrokethickness    = 2
+local nearestplayerdistance = 1000
+local lerpalpha             = 0.4
+local aimlockOffsetX        = 0
+local aimlockOffsetY        = 0
+local rainbowfov            = false
+local aimlockcertainplayer  = false
+local selectedplayer        = nil
+local prioritizedplayers    = {}
+local ignoredplayers        = {}
+local wallcheckenabled      = true
+local ignoreLobby           = true
+local aimlockConnection     = nil
+
+-- AutoFire
+local autoFireEnabled    = false
+local autoFireDelay      = 1.5
+local autoFireShootDelay = 0.1
+local nextFireTime       = 0
+local currentTarget      = nil
+local autoFireConnection = nil
+local isFiring           = false
+local aiming             = false
+
+-- Knife
+local knifeCloseEnabled      = false
+local knifeRange             = 10
+local showKnifeRange         = false
+local knifeRangeColor        = Color3.fromRGB(255,255,255)
+local knifeRangeTransparency = 0.5
+local rangeSphere            = nil
+local knifeConnection        = nil
+local lastKnifeState         = nil
+
+-- Crates
+local knifeCrateCount  = 0
+local gunCrateCount    = 0
+local isOpeningCrates  = false
+
+-- RGB
+local rgbGunKnifeEnabled   = false
+local rgbSpeed             = 10
+local rgbReapplySpeed      = 1
+local rgbHue               = 0
+local rgbConnection        = nil
+local rgbReapplyConnection = nil
+local lastGunTool          = nil
+local rgbType              = "Material"
+local rgbAsyncEnabled      = false
+local rgbSyncHue           = 0
+local rgbSyncLastUpdate    = 0
+local rgbAsyncSpeed        = 10
+local rgbAsyncMode         = "Backwards"
+
+-- SFX
+local hitSfxId         = ""
+local critSfxId        = ""
+local autoApplySfx     = false
+local autoApplyDelay   = 1
+local autoApplyConnection = nil
+
+-- Respawn
+local autoRespawnEnabled  = false
+local autoRespawnDelay    = 0
+local autoRespawnLastFire = 0
+local inLobby             = false
+
+-- Remotes
+local AimWeapon        = nil
+local AimStateChanged  = nil
+local FireWeaponMobile = nil
+local Sound_Request    = nil
+local CheckFire        = nil
+local CheckShot        = nil
+local ProjectileRender = nil
+local ProjectileFinished= nil
+local SwapWeapon       = nil
+local CommandRemote    = nil
+local RollCrate        = nil
+
+getgenv().RGB_ForceNeon = true
+
+-- ══════════════════════════════════════════
+--            HELPER FUNCTIONS
+-- ══════════════════════════════════════════
+local function GetLocalHRP()
+    if not LocalPlayer.Character then return nil end
+    return LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+end
+
+local function getrainbowcolor()
+    local ct = tick()
+    local inc = 0.001 * (11 - espconfig.rainbowspeed)
+    if ct - lastupdate >= 0.1 then
+        rainbowhue = (rainbowhue + inc) % 1
+        lastupdate = ct
+    end
+    return Color3.fromHSV(rainbowhue, 1, 1)
+end
+
+local function getSyncRainbowColor()
+    local ct = tick()
+    local inc = 0.001 * (11 - rgbAsyncSpeed)
+    if rgbAsyncMode == "Backwards" then inc = -inc end
+    if ct - rgbSyncLastUpdate >= 0.1 then
+        rgbSyncHue = (rgbSyncHue + inc) % 1
+        rgbSyncLastUpdate = ct
+    end
+    return Color3.fromHSV(rgbSyncHue, 1, 1)
+end
+
+local function getPlayerWeapon(player)
+    if not player.Character then return "None" end
+    local tool = player.Character:FindFirstChildWhichIsA("Tool")
+    return tool and tool.Name or "None"
+end
+
+-- ══════════════════════════════════════════
+--                  ESP
+-- ══════════════════════════════════════════
+local function createesp(player)
+    if player == LocalPlayer or espobjects[player] then return end
+    local nametext = Drawing.new("Text")
+    nametext.Size    = espconfig.espsize
+    nametext.Center  = true
+    nametext.Outline = true
+    nametext.Color   = espconfig.espcolor
+    nametext.Font    = 2
+    nametext.Visible = false
+    espobjects[player] = { Name = nametext }
+end
+
+local function removeesp(player)
+    if espobjects[player] then
+        espobjects[player].Name:Remove()
+        espobjects[player] = nil
+    end
+end
+
+local function updateesp()
+    for player, esp in pairs(espobjects) do
+        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local hrp = player.Character.HumanoidRootPart
+            local pos, onscreen = Camera:WorldToViewportPoint(hrp.Position)
+            local isShield = shieldedPlayers[player]
+            local color = isShield and Color3.fromRGB(255,0,0) or
+                (espconfig.rainbowesp and (rgbAsyncEnabled and getSyncRainbowColor() or getrainbowcolor()) or espconfig.espcolor)
+            esp.Name.Color = color
+            esp.Name.Size  = espconfig.espsize
+            if onscreen then
+                local dist   = (Camera.CFrame.Position - hrp.Position).Magnitude
+                local weapon = getPlayerWeapon(player)
+                local prefix = isShield and "[SHIELDED] " or ""
+                esp.Name.Position = Vector2.new(pos.X, pos.Y - 20)
+                esp.Name.Text     = prefix .. player.Name .. " | " .. math.floor(dist) .. " studs | " .. weapon
+                esp.Name.Visible  = true
+            else
+                esp.Name.Visible = false
+            end
+        else
+            esp.Name.Visible = false
+        end
+    end
+end
+
+local function removehighlight(player)
+    local uid = player.UserId
+    if activehighlights[uid] then activehighlights[uid]:Destroy() activehighlights[uid] = nil end
+    if playerconnections[uid] then
+        for _, c in pairs(playerconnections[uid]) do if c then c:Disconnect() end end
+        playerconnections[uid] = nil
+    end
+end
+
+local function applyhighlighttocharacter(player, character)
+    if not character then return end
+    local uid = player.UserId
+    if activehighlights[uid] then activehighlights[uid]:Destroy() end
+    local h = Instance.new("Highlight")
+    h.FillTransparency    = espconfig.outlinefilltransparency
+    h.OutlineTransparency = espconfig.outlinetransparency
+    h.OutlineColor        = espconfig.rainbowoutline and (rgbAsyncEnabled and getSyncRainbowColor() or getrainbowcolor()) or espconfig.outlinecolor
+    h.FillColor           = espconfig.rainbowoutline and (rgbAsyncEnabled and getSyncRainbowColor() or getrainbowcolor()) or espconfig.outlinefillcolor
+    h.Adornee             = character
+    h.Parent              = character
+    activehighlights[uid] = h
+end
+
+local function setupplayerhighlight(player)
+    local uid = player.UserId
+    playerconnections[uid] = playerconnections[uid] or {}
+    local function onchar(character)
+        if not character then return end
+        task.spawn(function()
+            local hum = character:WaitForChild("Humanoid", 5)
+            if not hum then return end
+            if outlineenabled then applyhighlighttocharacter(player, character) end
+            table.insert(playerconnections[uid], hum.Died:Connect(function() removehighlight(player) end))
+        end)
+    end
+    table.insert(playerconnections[uid], player.CharacterAdded:Connect(onchar))
+    if player.Character then onchar(player.Character) end
+end
+
+local function createtracers()
+    tracerlines = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            local line = Drawing.new("Line")
+            line.Thickness    = espconfig.tracersize
+            line.Transparency = 1
+            line.Visible      = false
+            tracerlines[p]    = line
+        end
+    end
+end
+
+local function updatetracers()
+    local screenH = Camera.ViewportSize.Y
+    local fromY = espconfig.tracerposition == "Bottom" and screenH
+               or espconfig.tracerposition == "Middle" and screenH / 2
+               or 0
+    for player, line in pairs(tracerlines) do
+        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local root = player.Character.HumanoidRootPart
+            local sp, onscreen = Camera:WorldToViewportPoint(root.Position)
+            local isShield = shieldedPlayers[player]
+            local color = isShield and Color3.fromRGB(255,0,0) or
+                (espconfig.rainbowtracers and (rgbAsyncEnabled and getSyncRainbowColor() or getrainbowcolor()) or espconfig.tracercolor)
+            if onscreen then
+                line.From    = Vector2.new(Camera.ViewportSize.X / 2, fromY)
+                line.To      = Vector2.new(sp.X, sp.Y)
+                line.Color   = color
+                line.Visible = true
+            else
+                line.Visible = false
+            end
+        else
+            line.Visible = false
+        end
+    end
+end
+
+local function toggletracers()
+    if tracersenabled then
+        createtracers()
+        RunService:BindToRenderStep("Tracers", Enum.RenderPriority.Camera.Value + 1, updatetracers)
+    else
+        RunService:UnbindFromRenderStep("Tracers")
+        for _, l in pairs(tracerlines) do l:Remove() end
+        tracerlines = {}
+    end
+end
+
+local function createskeletonlines()
+    skeletonlines = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            local lines = {}
+            for i = 1, 6 do
+                local l = Drawing.new("Line")
+                l.Thickness = 2; l.Transparency = 1; l.Visible = false
+                lines[i] = l
+            end
+            skeletonlines[p] = lines
+        end
+    end
+end
+
+local function updateskeleton()
+    for player, lines in pairs(skeletonlines) do
+        if player.Character then
+            local c = player.Character
+            local parts = {
+                Head     = c:FindFirstChild("Head"),
+                Torso    = c:FindFirstChild("UpperTorso") or c:FindFirstChild("Torso"),
+                Hip      = c:FindFirstChild("LowerTorso") or c:FindFirstChild("Torso"),
+                LeftArm  = c:FindFirstChild("LeftUpperArm") or c:FindFirstChild("Left Arm"),
+                RightArm = c:FindFirstChild("RightUpperArm") or c:FindFirstChild("Right Arm"),
+                LeftLeg  = c:FindFirstChild("LeftUpperLeg") or c:FindFirstChild("Left Leg"),
+                RightLeg = c:FindFirstChild("RightUpperLeg") or c:FindFirstChild("Right Leg")
+            }
+            local isShield = shieldedPlayers[player]
+            local color = isShield and Color3.fromRGB(255,0,0) or
+                (espconfig.rainbowskeleton and (rgbAsyncEnabled and getSyncRainbowColor() or getrainbowcolor()) or espconfig.skeletoncolor)
+            local function gs(part)
+                if part then
+                    local pos, vis = Camera:WorldToViewportPoint(part.Position)
+                    if vis then return Vector2.new(pos.X, pos.Y) end
+                end
+            end
+            local h = gs(parts.Head); local t = gs(parts.Torso)
+            local hip = gs(parts.Hip); local la = gs(parts.LeftArm)
+            local ra = gs(parts.RightArm); local ll = gs(parts.LeftLeg); local rl = gs(parts.RightLeg)
+            local conn = {{h,t,lines[1]},{t,hip,lines[2]},{t,la,lines[3]},{t,ra,lines[4]},{hip,ll,lines[5]},{hip,rl,lines[6]}}
+            for _, v in ipairs(conn) do
+                local p1, p2, line = v[1], v[2], v[3]
+                if p1 and p2 then line.From=p1; line.To=p2; line.Color=color; line.Visible=true
+                else line.Visible=false end
+            end
+        else
+            for _, l in ipairs(lines) do l.Visible = false end
+        end
+    end
+end
+
+local function toggleskeleton()
+    if skeletonenabled then
+        createskeletonlines()
+        RunService:BindToRenderStep("SkeletonESP", Enum.RenderPriority.Camera.Value+1, updateskeleton)
+    else
+        RunService:UnbindFromRenderStep("SkeletonESP")
+        for _, ls in pairs(skeletonlines) do for _, l in ipairs(ls) do l:Remove() end end
+        skeletonlines = {}
+    end
+end
+
+local function applyShieldEffect(player)
+    if player == LocalPlayer then return end
+    shieldedPlayers[player] = true
+    if activehighlights[player.UserId] then
+        activehighlights[player.UserId].OutlineColor = Color3.fromRGB(255,0,0)
+        activehighlights[player.UserId].FillColor    = Color3.fromRGB(255,0,0)
+    end
+    task.delay(1.5, function()
+        if shieldedPlayers[player] then
+            shieldedPlayers[player] = nil
+            if activehighlights[player.UserId] then
+                activehighlights[player.UserId].OutlineColor = espconfig.outlinecolor
+                activehighlights[player.UserId].FillColor    = espconfig.outlinefillcolor
+            end
+        end
+    end)
+end
+
+-- ══════════════════════════════════════════
+--               AIMLOCK
+-- ══════════════════════════════════════════
+local function checkLobbyStatus()
+    local team = LocalPlayer.Team
+    inLobby = team and team.Name == "Lobby" or false
+end
+
+local function isVisible(player)
+    if not player.Character then return false end
+    local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+    local localHRP = GetLocalHRP()
+    if not localHRP then return false end
+    local direction = hrp.Position - localHRP.Position
+    local ray = RaycastParams.new()
+    ray.FilterDescendantsInstances = {LocalPlayer.Character}
+    ray.FilterType = Enum.RaycastFilterType.Exclude
+    local result = workspace:Raycast(localHRP.Position, direction, ray)
+    return result and result.Instance:IsDescendantOf(player.Character)
+end
+
+local function getclosestplayer()
+    local closest, closestDist = nil, math.huge
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+            if not (ignoreLobby and shieldedPlayers[p]) then
+                local screenPos, onscreen = Camera:WorldToViewportPoint(p.Character.HumanoidRootPart.Position)
+                if onscreen then
+                    local dist
+                    if aimlocktype == "Nearest Mouse" then
+                        local mouse = UserInputService:GetMouseLocation()
+                        dist = (Vector2.new(screenPos.X, screenPos.Y) - mouse).Magnitude
+                    else
+                        local localHRP = GetLocalHRP()
+                        dist = localHRP and (localHRP.Position - p.Character.HumanoidRootPart.Position).Magnitude or math.huge
+                    end
+                    if dist < closestDist and dist <= nearestplayerdistance then
+                        if not wallcheckenabled or isVisible(p) then
+                            closest = p
+                            closestDist = dist
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return closest
+end
+
+local function getaimpartposition(targetplayer)
+    if not targetplayer or not targetplayer.Character then return nil end
+    local char = targetplayer.Character
+    if aimpart == "Head" then
+        local head = char:FindFirstChild("Head")
+        return head and head.Position or nil
+    elseif aimpart == "Torso" then
+        local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+        return torso and torso.Position or nil
+    elseif aimpart == "Feet" then
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        return hrp and hrp.Position + Vector3.new(0,-3,0) or nil
+    end
+end
+
+local function updateaimlock()
+    local localHRP = GetLocalHRP()
+    if not localHRP then return end
+    checkLobbyStatus()
+    if inLobby then return end
+    local targetplayer = aimlockcertainplayer and selectedplayer or getclosestplayer()
+    if targetplayer then
+        local targetposition = getaimpartposition(targetplayer)
+        if targetposition then
+            targetposition = targetposition + Vector3.new(aimlockOffsetX, aimlockOffsetY, 0)
+            local lookdirection = (targetposition - Camera.CFrame.Position).Unit
+            if smoothaimlock then
+                Camera.CFrame = Camera.CFrame:Lerp(CFrame.lookAt(Camera.CFrame.Position, Camera.CFrame.Position + lookdirection), lerpalpha)
+            else
+                Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, Camera.CFrame.Position + lookdirection)
+            end
+        end
+    end
+end
+
+local function toggleAimlock()
+    if aimlockenabled then
+        if aimlockConnection then return end
+        aimlockConnection = RunService.RenderStepped:Connect(updateaimlock)
+    else
+        if aimlockConnection then aimlockConnection:Disconnect() aimlockConnection = nil end
+    end
+end
+
+local function updatefovcircle()
+    if fovframe and fovstroke then
+        if showfov then
+            fovstroke.Color   = rainbowfov and (rgbAsyncEnabled and getSyncRainbowColor() or getrainbowcolor()) or fovcolor
+            fovframe.Visible  = true
+        else
+            fovframe.Visible  = false
+        end
+    end
+end
+
+-- ══════════════════════════════════════════
+--           MOVEMENT & WORLD
+-- ══════════════════════════════════════════
+local function toggleNoVelocity()
+    if noVelocityEnabled then
+        noVelocityConnection = RunService.Heartbeat:Connect(function()
+            for _, p in pairs(Players:GetPlayers()) do
+                if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                    local hrp = p.Character.HumanoidRootPart
+                    hrp.AssemblyLinearVelocity  = Vector3.new(0,0,0)
+                    hrp.AssemblyAngularVelocity = Vector3.new(0,0,0)
+                end
+            end
+        end)
+    else
+        if noVelocityConnection then noVelocityConnection:Disconnect() noVelocityConnection = nil end
+    end
+end
+
+local function toggleBunnyHop()
+    if bunnyHopEnabled then
+        bunnyHopConnection = RunService.Heartbeat:Connect(function()
+            local char = LocalPlayer.Character
+            if not char or not char:FindFirstChild("Humanoid") then return end
+            local hum = char.Humanoid
+            if hum:GetState() == Enum.HumanoidStateType.Running and hum.FloorMaterial ~= Enum.Material.Air then
+                hum:ChangeState(Enum.HumanoidStateType.Jumping)
+                task.wait(bunnyHopDelay)
+            end
+        end)
+    else
+        if bunnyHopConnection then bunnyHopConnection:Disconnect() bunnyHopConnection = nil end
+    end
+end
+
+-- ══════════════════════════════════════════
+--         KNIFE & CRATES & RGB & SFX
+-- ══════════════════════════════════════════
+local function updateKnifeRangeSphere()
+    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        if rangeSphere then rangeSphere.Transparency = 1 end return
+    end
+    local root = LocalPlayer.Character.HumanoidRootPart
+    if showKnifeRange then
+        if not rangeSphere then
+            rangeSphere = Instance.new("Part")
+            rangeSphere.Name       = "KnifeRangeSphere"
+            rangeSphere.Shape      = Enum.PartType.Ball
+            rangeSphere.Material   = Enum.Material.ForceField
+            rangeSphere.CanCollide = false
+            rangeSphere.Anchored   = true
+            rangeSphere.CastShadow = false
+            rangeSphere.Parent     = workspace
+        end
+        rangeSphere.Size        = Vector3.new(knifeRange*2, knifeRange*2, knifeRange*2)
+        rangeSphere.CFrame      = root.CFrame
+        rangeSphere.Color       = knifeRangeColor
+        rangeSphere.Transparency= knifeRangeTransparency
+    else
+        if rangeSphere then rangeSphere:Destroy() rangeSphere = nil end
+    end
+end
+
+local function anyEnemyInRange()
+    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return false end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+            if (root.Position - p.Character.HumanoidRootPart.Position).Magnitude <= knifeRange then return true end
+        end
+    end
+    return false
+end
+
+local function toggleKnifeSwitch()
+    if knifeCloseEnabled then
+        knifeConnection = RunService.Heartbeat:Connect(function()
+            if not knifeCloseEnabled then return end
+            local shouldBeKnife = anyEnemyInRange()
+            if lastKnifeState == nil or lastKnifeState ~= shouldBeKnife then
+                if SwapWeapon then SwapWeapon:Fire() end
+                lastKnifeState = shouldBeKnife
+            end
+        end)
+    else
+        if knifeConnection then knifeConnection:Disconnect() knifeConnection = nil end
+        lastKnifeState = nil
+    end
+end
+
+local function openKnifeCrates()
+    if isOpeningCrates then return end
+    isOpeningCrates = true
+    for i = 1, knifeCrateCount do
+        if RollCrate then RollCrate:FireServer("KnifeCrate") end
+        task.wait(0.1)
+    end
+    isOpeningCrates = false
+end
+
+local function openGunCrates()
+    if isOpeningCrates then return end
+    isOpeningCrates = true
+    for i = 1, gunCrateCount do
+        if RollCrate then RollCrate:FireServer("GunCrate") end
+        task.wait(0.1)
+    end
+    isOpeningCrates = false
+end
+
+local function applyRGBToGun(toolModel, hue)
+    if not toolModel then return end
+    for _, part in ipairs(toolModel:GetDescendants()) do
+        if part:IsA("UnionOperation") or part:IsA("BasePart") then
+            if rgbGunKnifeEnabled and getgenv().RGB_ForceNeon then part.Material = Enum.Material.Neon end
+            part.Color = Color3.fromHSV(hue, 1, 1)
+            part.UsePartColor = true
+            local light = part:FindFirstChildOfClass("SpotLight") or Instance.new("SpotLight")
+            light.Color = Color3.fromHSV(hue, 1, 1)
+            light.Range = 18; light.Brightness = 5; light.Angle = 90
+            light.Parent = part
+        end
+    end
+end
+
+local function toggleRGBGunKnife()
+    if rgbGunKnifeEnabled then
+        rgbConnection = RunService.Heartbeat:Connect(function()
+            rgbHue = (rgbHue + (rgbSpeed/5000)) % 1
+            if rgbAsyncEnabled then rgbHue = rgbSyncHue end
+            if LocalPlayer.Character then
+                for _, tool in ipairs(LocalPlayer.Character:GetChildren()) do
+                    if tool:IsA("Tool") then
+                        lastGunTool = tool
+                        if rgbType == "Material" then
+                            for _, m in ipairs(tool:GetChildren()) do
+                                if m:IsA("Model") then applyRGBToGun(m, rgbHue) end
+                            end
+                        elseif rgbType == "Highlight" then
+                            local h = tool:FindFirstChild("RGBHighlight") or Instance.new("Highlight")
+                            h.Name = "RGBHighlight"; h.FillTransparency = 0.5
+                            h.OutlineTransparency = 0
+                            h.FillColor = Color3.fromHSV(rgbHue,1,1)
+                            h.OutlineColor = Color3.fromHSV(rgbHue,1,1)
+                            h.Adornee = tool; h.Parent = tool
+                        end
+                    end
+                end
+            end
+        end)
+    else
+        if rgbConnection then rgbConnection:Disconnect() rgbConnection = nil end
+        if lastGunTool then
+            for _, m in ipairs(lastGunTool:GetDescendants()) do
+                if m:IsA("BasePart") or m:IsA("UnionOperation") then
+                    local l = m:FindFirstChildOfClass("SpotLight")
+                    if l then l:Destroy() end
+                end
+            end
+            local h = lastGunTool:FindFirstChild("RGBHighlight")
+            if h then h:Destroy() end
+        end
+    end
+end
+
+local function applyCustomSFX()
+    local gui = LocalPlayer:FindFirstChild("PlayerGui")
+    if not gui then return end
+    local effect = gui:FindFirstChild("Effect")
+    if not effect then return end
+    local hitS = effect:FindFirstChild("Bang")
+    local critS = effect:FindFirstChild("Crit")
+    if hitS and hitSfxId ~= "" then hitS.SoundId = "rbxassetid://" .. hitSfxId end
+    if critS and critSfxId ~= "" then critS.SoundId = "rbxassetid://" .. critSfxId end
+end
+
+local function toggleAutoApplySFX()
+    if autoApplySfx then
+        autoApplyConnection = RunService.Heartbeat:Connect(function()
+            task.wait(autoApplyDelay)
+            applyCustomSFX()
+        end)
+    else
+        if autoApplyConnection then autoApplyConnection:Disconnect() autoApplyConnection = nil end
+    end
+end
+
+-- ══════════════════════════════════════════
+--              AUTO FIRE
+-- ══════════════════════════════════════════
+local function startAim(head)
+    if aiming then return end
+    if AimStateChanged then AimStateChanged:Fire(true) end
+    if AimWeapon then AimWeapon:Fire(Enum.UserInputState.Begin) end
+    Camera.CFrame = CFrame.new(Camera.CFrame.Position, head.Position)
+    aiming = true
+end
+
+local function stopAim()
+    if not aiming then return end
+    if AimStateChanged then AimStateChanged:Fire(false) end
+    if AimWeapon then AimWeapon:Fire(Enum.UserInputState.End) end
+    aiming = false
+end
+
+local function fireOnce(head)
+    if isFiring then return end
+    isFiring = true
+    local ts  = os.clock()
+    local muz = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Torso") and LocalPlayer.Character.Torso.Position or Camera.CFrame.Position
+    local hit = head.Position
+    local dir = (hit - muz).Unit
+    local vel = dir * 800
+    if Sound_Request then Sound_Request:FireServer(LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Torso") or Camera, "rbxassetid://3821795742") end
+    if CheckFire then CheckFire:FireServer(ts, hit) end
+    local cf = CFrame.lookAt(hit, muz)
+    if CheckShot then CheckShot:FireServer(0,0,1,0.8, cf, muz, head, 6310, ts) end
+    if ProjectileRender then ProjectileRender:FireServer(ts, LocalPlayer.Character, muz, vel, 130, 1, Vector3.zero, 5, "Bullet") end
+    if FireWeaponMobile then
+        FireWeaponMobile:Fire(Enum.UserInputState.Begin)
+        task.wait(autoFireShootDelay)
+        FireWeaponMobile:Fire(Enum.UserInputState.End)
+    end
+    task.delay(0.1, function()
+        if ProjectileFinished then ProjectileFinished:FireServer(ts, head.CFrame, "Gib_T", false, 15, "rbxassetid://2814354338") end
+    end)
+    task.delay(autoFireDelay, function() isFiring = false end)
+end
+
+local function toggleAutoFire()
+    if autoFireEnabled then
+        currentTarget = nil; nextFireTime = 0; isFiring = false
+        autoFireConnection = RunService.Heartbeat:Connect(function()
+            if not autoFireEnabled then return end
+            checkLobbyStatus()
+            if inLobby then if currentTarget then stopAim() currentTarget = nil end return end
+            local localHRP = GetLocalHRP()
+            if not localHRP then if currentTarget then stopAim() currentTarget = nil end return end
+            local tp = aimlockcertainplayer and selectedplayer or getclosestplayer()
+            if not tp or not tp.Character then if currentTarget then stopAim() currentTarget = nil end return end
+            local head = tp.Character:FindFirstChild("Head")
+            if not head then if currentTarget then stopAim() currentTarget = nil end return end
+            local hum = tp.Character:FindFirstChild("Humanoid")
+            if not hum or hum.Health <= 0 then if currentTarget then stopAim() currentTarget = nil end return end
+            if tp ~= currentTarget then currentTarget = tp; startAim(head) end
+            if not isFiring then fireOnce(head) end
+        end)
+    else
+        if autoFireConnection then autoFireConnection:Disconnect() autoFireConnection = nil end
+        currentTarget = nil; isFiring = false; stopAim()
+    end
+end
+
+-- ══════════════════════════════════════════
+--         REMOTE SETUP (background)
+-- ══════════════════════════════════════════
+task.spawn(function()
+    local function waitForRemote(path, name)
+        if not path or not name then return nil end
+        while not path:FindFirstChild(name) do task.wait(0.1) end
+        return path:FindFirstChild(name)
+    end
+    local signalEvents = ReplicatedStorage:WaitForChild("SignalManager", 10)
+    if not signalEvents then return end
+    signalEvents = signalEvents:WaitForChild("SignalEvents", 10)
+    if not signalEvents then return end
+    AimWeapon        = waitForRemote(signalEvents, "AimWeapon")
+    AimStateChanged  = waitForRemote(signalEvents, "AimStateChanged")
+    FireWeaponMobile = waitForRemote(signalEvents, "FireWeaponMoblie")
+    SwapWeapon       = waitForRemote(signalEvents, "SwapWeapon")
+    local remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
+    if remotes then
+        CommandRemote = waitForRemote(remotes, "Command")
+        RollCrate     = waitForRemote(remotes, "RollCrate")
+    end
+    local soundModule = ReplicatedStorage:FindFirstChild("SoundModule")
+    if soundModule then Sound_Request = waitForRemote(soundModule, "Sound_RequestFromServer_C2S") end
+    local clientRemotes = LocalPlayer:FindFirstChild("ClientRemotes")
+    if clientRemotes then
+        CheckFire = waitForRemote(clientRemotes, "CheckFire")
+        CheckShot = waitForRemote(clientRemotes, "CheckShot")
+    end
+    local gunModules = ReplicatedStorage:FindFirstChild("ModuleScripts")
+    if gunModules then
+        gunModules = gunModules:FindFirstChild("GunModules")
+        if gunModules then
+            gunModules = gunModules:FindFirstChild("Remote")
+            if gunModules then
+                ProjectileRender   = waitForRemote(gunModules, "ProjectileRender")
+                ProjectileFinished = waitForRemote(gunModules, "ProjectileFinished")
+            end
+        end
+    end
+end)
+
+-- ══════════════════════════════════════════
+--          WALKSPEED LOOP
+-- ══════════════════════════════════════════
+task.spawn(function()
+    while true do
+        task.wait()
+        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+            LocalPlayer.Character.Humanoid.WalkSpeed = currentwalkspeed
+        end
+    end
+end)
+
+-- ══════════════════════════════════════════
+--         RENDERSTEPPED (outline + fov)
+-- ══════════════════════════════════════════
+RunService.RenderStepped:Connect(function()
+    updateKnifeRangeSphere()
+    if outlineenabled then
+        for _, h in pairs(activehighlights) do
+            if h then
+                h.OutlineColor = espconfig.rainbowoutline and (rgbAsyncEnabled and getSyncRainbowColor() or getrainbowcolor()) or espconfig.outlinecolor
+                h.FillColor    = espconfig.rainbowoutline and (rgbAsyncEnabled and getSyncRainbowColor() or getrainbowcolor()) or espconfig.outlinefillcolor
+            end
+        end
+    end
+    updatefovcircle()
+end)
+
+-- ══════════════════════════════════════════
+--         PLAYER ADDED/REMOVING
+-- ══════════════════════════════════════════
+Players.PlayerAdded:Connect(function(p)
+    if p == LocalPlayer then return end
+    if espenabled then createesp(p) end
+    if outlineenabled then playerconnections[p.UserId]={} setupplayerhighlight(p) end
+    if tracersenabled then
+        local l = Drawing.new("Line"); l.Thickness=espconfig.tracersize; l.Transparency=1; l.Visible=false
+        tracerlines[p]=l
+    end
+    if skeletonenabled then
+        local ls={}
+        for i=1,6 do local l=Drawing.new("Line"); l.Thickness=2; l.Transparency=1; l.Visible=false; ls[i]=l end
+        skeletonlines[p]=ls
+    end
+    p.CharacterAdded:Connect(function(c)
+        applyShieldEffect(p)
+        if espenabled then task.wait(0.1) if not espobjects[p] then createesp(p) end end
+        if outlineenabled then task.wait(0.1) applyhighlighttocharacter(p, c) end
+    end)
+end)
+
+Players.PlayerRemoving:Connect(function(p)
+    removeesp(p); removehighlight(p); shieldedPlayers[p]=nil
+    if tracerlines[p] then tracerlines[p]:Remove() tracerlines[p]=nil end
+    if skeletonlines[p] then for _, l in ipairs(skeletonlines[p]) do l:Remove() end skeletonlines[p]=nil end
+end)
+
+for _, p in pairs(Players:GetPlayers()) do
+    if p ~= LocalPlayer then
+        p.CharacterAdded:Connect(function(c)
+            applyShieldEffect(p)
+            if espenabled then task.wait(0.1) if not espobjects[p] then createesp(p) end end
+            if outlineenabled then task.wait(0.1) applyhighlighttocharacter(p, c) end
+        end)
+    end
+end
+
+LocalPlayer.CharacterAdded:Connect(function()
+    aiming = false; currentTarget = nil
+end)
+
+-- ══════════════════════════════════════════════════════
+--                  TRANSLATIONS
+-- ══════════════════════════════════════════════════════
+_G.SelectedLanguage = _G.SelectedLanguage or "Arabic"
+
+local Translations = {
+    Arabic = {
+        -- عام
+        welcome         = "أهلاً وسهلاً في PhantomXPro 🌟",
+        warning         = "⚠️ تنبيه هام:\nتشغيل السكربت يكون على مسؤوليتك الشخصية والكاملة. نتمنى لكم تجربة ممتعة ❤",
+        notification    = "تنبيه",
+        scriptClosed    = "تم قفل السكربت",
+        languageChanged = "جاري إعادة التشغيل...",
+        changeLanguage  = "غير اللغة للإنجليزي",
+        version         = "الإصدار 1.0.0",
+        closeScript     = "أقفل السكربت",
+        selectTheme     = "اختر الثيم",
+        joinDiscord     = "انضم للديسكورد",
+        copyLink        = "نسخ الرابط",
+        linkCopied      = "✅ تم نسخ الرابط",
+        linkCopiedContent = "تم نسخ رابط الديسكورد",
+        discord         = "🎮 سيرفر الديسكورد",
+        discordContent  = "رابط: https://discord.gg/uRtbxxxrau",
+
+        -- تابات
+        tabESP          = "ESP",
+        tabAimbot       = "Aimbot",
+        tabMovement     = "الحركة",
+        tabVisuals      = "المرئيات",
+        tabFeatures     = "الميزات",
+        tabSettings     = "الإعدادات",
+
+        -- ESP
+        espEnabled      = "تفعيل ESP",
+        espColor        = "لون ESP",
+        outline         = "هايلايت اللاعبين",
+        outlineColor    = "لون الهايلايت",
+        outlineFill     = "لون داخل الهايلايت",
+        tracers         = "خطوط التتبع",
+        tracerColor     = "لون الخط",
+        skeletonEsp     = "هيكل العظام",
+        skeletonColor   = "لون الهيكل",
+        rainbowEsp      = "راينبو ESP",
+        rainbowOutline  = "راينبو هايلايت",
+        rainbowTracers  = "راينبو خطوط",
+        rainbowSkeleton = "راينبو هيكل",
+        espSize         = "حجم النص",
+        tracerPos       = "موقع الخط",
+        outlineTrans    = "شفافية الهايلايت",
+        outlineFillTrans= "شفافية داخل الهايلايت",
+        rainbowSpeed    = "سرعة الراينبو",
+
+        -- Aimbot
+        aimlockActive   = "تفعيل Aimlock",
+        aimlockType     = "نوع Aimlock",
+        aimPart         = "الجزء المستهدف",
+        prioritizePlayer= "أولوية لاعب",
+        refreshPlayers  = "تحديث اللاعبين",
+        lockSpecific    = "قفل لاعب محدد",
+        smoothAim       = "سموث أيم",
+        smoothSpeed     = "سرعة السموث",
+        wallCheck       = "فحص الجدران",
+        lockDist        = "مسافة القفل",
+        autoFire        = "إطلاق تلقائي ⚠️",
+        fireDelay       = "تأخير الإطلاق",
+        fovEnable       = "تفعيل FOV",
+        showFov         = "إظهار FOV",
+        fovSize         = "حجم FOV",
+        fovColor        = "لون FOV",
+        rainbowFov      = "راينبو FOV",
+
+        -- Movement
+        walkspeed       = "سرعة المشي",
+        noVelocity      = "إيقاف السرعة",
+        bunnyHop        = "بني هوب",
+        bunnyDelay      = "تأخير البني هوب",
+        xray            = "X-Ray",
+        xrayTrans       = "شفافية X-Ray",
+        autoRespawn     = "إعادة توليد تلقائية",
+        autoRespawnDelay= "تأخير إعادة التوليد",
+        joinLobby       = "الذهاب للوبي",
+        joinPlay        = "الذهاب للعبة",
+
+        -- Visuals
+        fullBright      = "إضاءة كاملة",
+        noFog           = "إزالة الضباب",
+        camFov          = "زاوية الكاميرا",
+
+        -- Features
+        knifeSwitch     = "تبديل للسكين",
+        knifeRange      = "مسافة السكين",
+        showRange       = "إظهار النطاق",
+        knifeCrates     = "صناديق سكين",
+        openKnifeCrates = "فتح صناديق السكين",
+        gunCrates       = "صناديق مسدس",
+        openGunCrates   = "فتح صناديق المسدس",
+        rgbGunKnife     = "راينبو سلاح",
+        rgbType         = "نوع الراينبو",
+        rgbSpeed        = "سرعة الراينبو",
+        hitSfxId        = "ID صوت الضربة",
+        critSfxId       = "ID صوت الكريت",
+        autoApplySfx    = "تطبيق صوت تلقائي",
+    },
+    English = {
+        welcome         = "Welcome to PhantomXPro 🌟",
+        warning         = "⚠️ Important Warning:\nUsing this script is at your own risk. Enjoy! ❤",
+        notification    = "Notification",
+        scriptClosed    = "Script Closed",
+        languageChanged = "Restarting...",
+        changeLanguage  = "Change Language to Arabic",
+        version         = "Version 1.0.0",
+        closeScript     = "Close Script",
+        selectTheme     = "Select Theme",
+        joinDiscord     = "Join Discord",
+        copyLink        = "Copy Link",
+        linkCopied      = "✅ Link Copied",
+        linkCopiedContent = "Discord link copied",
+        discord         = "🎮 Discord Server",
+        discordContent  = "Link: https://discord.gg/uRtbxxxrau",
+
+        tabESP          = "ESP",
+        tabAimbot       = "Aimbot",
+        tabMovement     = "Movement",
+        tabVisuals      = "Visuals",
+        tabFeatures     = "Features",
+        tabSettings     = "Settings",
+
+        espEnabled      = "Enable ESP",
+        espColor        = "ESP Color",
+        outline         = "Player Highlights",
+        outlineColor    = "Outline Color",
+        outlineFill     = "Outline Fill Color",
+        tracers         = "Tracers",
+        tracerColor     = "Tracer Color",
+        skeletonEsp     = "Skeleton ESP",
+        skeletonColor   = "Skeleton Color",
+        rainbowEsp      = "Rainbow ESP",
+        rainbowOutline  = "Rainbow Outline",
+        rainbowTracers  = "Rainbow Tracers",
+        rainbowSkeleton = "Rainbow Skeleton",
+        espSize         = "ESP Text Size",
+        tracerPos       = "Tracer Position",
+        outlineTrans    = "Outline Transparency",
+        outlineFillTrans= "Fill Transparency",
+        rainbowSpeed    = "Rainbow Speed",
+
+        aimlockActive   = "Enable Aimlock",
+        aimlockType     = "Aimlock Type",
+        aimPart         = "Aim Part",
+        prioritizePlayer= "Prioritize Player",
+        refreshPlayers  = "Refresh Players",
+        lockSpecific    = "Lock Specific Player",
+        smoothAim       = "Smooth Aim",
+        smoothSpeed     = "Smooth Speed",
+        wallCheck       = "Wall Check",
+        lockDist        = "Lock Distance",
+        autoFire        = "Auto-Fire ⚠️",
+        fireDelay       = "Fire Delay",
+        fovEnable       = "Enable FOV",
+        showFov         = "Show FOV",
+        fovSize         = "FOV Size",
+        fovColor        = "FOV Color",
+        rainbowFov      = "Rainbow FOV",
+
+        walkspeed       = "Walk Speed",
+        noVelocity      = "No Velocity",
+        bunnyHop        = "Bunny Hop",
+        bunnyDelay      = "Bunny Hop Delay",
+        xray            = "X-Ray",
+        xrayTrans       = "X-Ray Transparency",
+        autoRespawn     = "Auto Respawn",
+        autoRespawnDelay= "Respawn Delay",
+        joinLobby       = "Join Lobby",
+        joinPlay        = "Join Game",
+
+        fullBright      = "Full Bright",
+        noFog           = "No Fog",
+        camFov          = "Camera FOV",
+
+        knifeSwitch     = "Knife Switch",
+        knifeRange      = "Knife Range",
+        showRange       = "Show Range",
+        knifeCrates     = "Knife Crates",
+        openKnifeCrates = "Open Knife Crates",
+        gunCrates       = "Gun Crates",
+        openGunCrates   = "Open Gun Crates",
+        rgbGunKnife     = "RGB Gun/Knife",
+        rgbType         = "RGB Type",
+        rgbSpeed        = "RGB Speed",
+        hitSfxId        = "Hit SFX ID",
+        critSfxId       = "Crit SFX ID",
+        autoApplySfx    = "Auto Apply SFX",
+    }
+}
+
+local function T(key)
+    return Translations[_G.SelectedLanguage][key] or key
+end
+
+-- ══════════════════════════════════════════════════════
+--                CLEANUP HELPER
+-- ══════════════════════════════════════════════════════
+local function cleanupGUI()
+    for _, v in pairs(game.CoreGui:GetChildren()) do
+        if v:IsA("ScreenGui") and (v.Name:find("Wind") or v.Name:find("Phantom")) then
+            v:Destroy()
+        end
+    end
+end
+
+-- ══════════════════════════════════════════════════════
+--                  MAIN UI BUILDER
+-- ══════════════════════════════════════════════════════
+local function createMainScript()
+    cleanupGUI()
+
+    local ok, newWind = pcall(function()
+        local src = game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua", true)
+        return loadstring(src)()
+    end)
+    if not ok then
+        WindUI:Notify({ Title = "❌ Error", Content = "Failed to reload UI", Duration = 3 })
+        return
+    end
+
+    WindUI = newWind
+
+    -- Warning popup
+    WindUI:Popup({
+        Title   = "PhantomXPro | Flick",
+        Icon    = "crown",
+        Content = T("warning"),
+        Buttons = {{
+            Title    = _G.SelectedLanguage == "Arabic" and "موافق" or "OK",
+            Icon     = "check",
+            Variant  = "Primary",
+            Callback = function() end
+        }}
+    })
+
+    task.wait(4)
+
+    -- Discord popup
+    WindUI:Popup({
+        Title   = T("discord"),
+        Icon    = "message-circle",
+        Content = T("discordContent"),
+        Buttons = {{
+            Title    = T("copyLink"),
+            Icon     = "copy",
+            Variant  = "Primary",
+            Callback = function()
+                setclipboard("https://discord.gg/uRtbxxxrau")
+                WindUI:Notify({ Title = T("linkCopied"), Content = T("linkCopiedContent"), Duration = 3 })
+            end
+        }}
+    })
+
+    -- Window
+    local Window = WindUI:CreateWindow({
+        Title                    = "PhantomXPro | Flick",
+        Icon                     = "rbxassetid://112352744088491",
+        Author                   = "By_Cypher",
+        Folder                   = "PhantomXPro",
+        Size                     = UDim2.fromOffset(820, 620),
+        Theme                    = "Indigo",
+        Background               = "rbxassetid://12892030103",
+        BackgroundImageTransparency = 0.8,
+        Transparent              = true,
+        SideBarWidth             = 260,
+        ScrollBarEnabled         = true,
+    })
+
+    -- ── SECTIONS ──────────────────────────────────────
+    local SecESP      = Window:Section({ Title = T("tabESP"),      Opened = true })
+    local SecAimbot   = Window:Section({ Title = T("tabAimbot"),   Opened = false })
+    local SecMovement = Window:Section({ Title = T("tabMovement"), Opened = false })
+    local SecVisuals  = Window:Section({ Title = T("tabVisuals"),  Opened = false })
+    local SecFeatures = Window:Section({ Title = T("tabFeatures"), Opened = false })
+    local SecSettings = Window:Section({ Title = T("tabSettings"), Opened = false })
+
+    -- ── TABS ──────────────────────────────────────────
+    local TabESP      = SecESP:Tab({      Title = T("tabESP"),      Icon = "eye" })
+    local TabAimbot   = SecAimbot:Tab({   Title = T("tabAimbot"),   Icon = "crosshair" })
+    local TabMovement = SecMovement:Tab({ Title = T("tabMovement"), Icon = "zap" })
+    local TabVisuals  = SecVisuals:Tab({  Title = T("tabVisuals"),  Icon = "sun" })
+    local TabFeatures = SecFeatures:Tab({ Title = T("tabFeatures"), Icon = "box" })
+    local TabSettings = SecSettings:Tab({ Title = T("tabSettings"), Icon = "settings" })
+
+    -- ══════════════════════════════════════════════════
+    --                    TAB: ESP
+    -- ══════════════════════════════════════════════════
+    TabESP:Toggle({
+        Title = T("espEnabled"), Value = false,
+        Callback = function(v)
+            espenabled = v
+            if v then
+                for _, p in pairs(Players:GetPlayers()) do if p ~= LocalPlayer then createesp(p) end end
+                RunService:BindToRenderStep("ESPUpdate", Enum.RenderPriority.Camera.Value+1, updateesp)
+            else
+                for p, _ in pairs(espobjects) do removeesp(p) end
+                RunService:UnbindFromRenderStep("ESPUpdate")
+            end
+        end
+    })
+    TabESP:ColorPicker({ Title = T("espColor"), Value = Color3.fromRGB(255,255,255), Callback = function(v) espconfig.espcolor = v end })
+    TabESP:Divider({ Title = "" })
+
+    TabESP:Toggle({
+        Title = T("outline"), Value = false,
+        Callback = function(v)
+            outlineenabled = v
+            if v then
+                for _, p in pairs(Players:GetPlayers()) do
+                    if p ~= LocalPlayer then playerconnections[p.UserId]={} setupplayerhighlight(p) end
+                end
+            else
+                for _, p in pairs(Players:GetPlayers()) do removehighlight(p) end
+            end
+        end
+    })
+    TabESP:ColorPicker({ Title = T("outlineColor"), Value = Color3.fromRGB(255,255,255), Callback = function(v) espconfig.outlinecolor = v end })
+    TabESP:ColorPicker({ Title = T("outlineFill"),  Value = Color3.fromRGB(255,255,255), Callback = function(v) espconfig.outlinefillcolor = v end })
+    TabESP:Slider({ Title = T("outlineTrans"),     Min = 0, Max = 100, Value = 0,   Callback = function(v) espconfig.outlinetransparency = v/100 end })
+    TabESP:Slider({ Title = T("outlineFillTrans"), Min = 0, Max = 100, Value = 100, Callback = function(v) espconfig.outlinefilltransparency = v/100 end })
+    TabESP:Divider({ Title = "" })
+
+    TabESP:Toggle({
+        Title = T("tracers"), Value = false,
+        Callback = function(v) tracersenabled = v toggletracers() end
+    })
+    TabESP:ColorPicker({ Title = T("tracerColor"), Value = Color3.fromRGB(255,255,255), Callback = function(v) espconfig.tracercolor = v end })
+    TabESP:Dropdown({
+        Title = T("tracerPos"),
+        Values = { "Bottom", "Middle", "Up" },
+        Value  = "Bottom",
+        Callback = function(v) espconfig.tracerposition = v end
+    })
+    TabESP:Divider({ Title = "" })
+
+    TabESP:Toggle({
+        Title = T("skeletonEsp"), Value = false,
+        Callback = function(v) skeletonenabled = v toggleskeleton() end
+    })
+    TabESP:ColorPicker({ Title = T("skeletonColor"), Value = Color3.fromRGB(255,255,255), Callback = function(v) espconfig.skeletoncolor = v end })
+    TabESP:Divider({ Title = "" })
+
+    TabESP:Toggle({ Title = T("rainbowEsp"),      Value = false, Callback = function(v) espconfig.rainbowesp      = v end })
+    TabESP:Toggle({ Title = T("rainbowOutline"),   Value = false, Callback = function(v) espconfig.rainbowoutline  = v end })
+    TabESP:Toggle({ Title = T("rainbowTracers"),   Value = false, Callback = function(v) espconfig.rainbowtracers  = v end })
+    TabESP:Toggle({ Title = T("rainbowSkeleton"),  Value = false, Callback = function(v) espconfig.rainbowskeleton = v end })
+    TabESP:Slider({ Title = T("rainbowSpeed"),     Min = 1, Max = 10, Value = 5,  Callback = function(v) espconfig.rainbowspeed = v end })
+    TabESP:Slider({ Title = T("espSize"),          Min = 16, Max = 48, Value = 16, Callback = function(v) espconfig.espsize = v end })
+
+    -- ══════════════════════════════════════════════════
+    --                  TAB: AIMBOT
+    -- ══════════════════════════════════════════════════
+    TabAimbot:Toggle({
+        Title = T("aimlockActive"), Value = false,
+        Callback = function(v) aimlockenabled = v toggleAimlock() end
+    })
+    TabAimbot:Dropdown({
+        Title  = T("aimlockType"),
+        Values = { "Nearest Player", "Nearest Mouse" },
+        Value  = "Nearest Player",
+        Callback = function(v) aimlocktype = v end
+    })
+    TabAimbot:Dropdown({
+        Title  = T("aimPart"),
+        Values = { "Head", "Torso", "Feet" },
+        Value  = "Head",
+        Callback = function(v) aimpart = v end
+    })
+    TabAimbot:Divider({ Title = "" })
+
+    local function getPlayerList()
+        local list = {}
+        for _, p in pairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer then table.insert(list, p.Name) end
+        end
+        return list
+    end
+
+    local playerDropdown = TabAimbot:Dropdown({
+        Title  = T("prioritizePlayer"),
+        Values = getPlayerList(),
+        Value  = "",
+        Callback = function(v) selectedplayer = Players:FindFirstChild(v) end
+    })
+    TabAimbot:Button({
+        Title = T("refreshPlayers"), Icon = "refresh-cw",
+        Callback = function()
+            playerDropdown:SetValues(getPlayerList())
+            WindUI:Notify({ Title = T("notification"), Content = "✅", Duration = 2 })
+        end
+    })
+    TabAimbot:Toggle({ Title = T("lockSpecific"), Value = false, Callback = function(v) aimlockcertainplayer = v end })
+    TabAimbot:Divider({ Title = "" })
+
+    TabAimbot:Toggle({ Title = T("smoothAim"),  Value = false, Callback = function(v) smoothaimlock = v end })
+    TabAimbot:Slider({ Title = T("smoothSpeed"), Min = 100, Max = 1000, Value = 400, Callback = function(v) lerpalpha = v/1000 end })
+    TabAimbot:Toggle({ Title = T("wallCheck"),  Value = true,  Callback = function(v) wallcheckenabled = v end })
+    TabAimbot:Slider({ Title = T("lockDist"),   Min = 10, Max = 5000, Value = 1000, Callback = function(v) nearestplayerdistance = v end })
+    TabAimbot:Divider({ Title = "" })
+
+    TabAimbot:Toggle({
+        Title = T("autoFire"), Value = false,
+        Callback = function(v) autoFireEnabled = v toggleAutoFire() end
+    })
+    TabAimbot:Slider({ Title = T("fireDelay"), Min = 1, Max = 5, Value = 2, Callback = function(v) autoFireDelay = v end })
+    TabAimbot:Divider({ Title = "" })
+
+    TabAimbot:Toggle({ Title = T("fovEnable"), Value = false, Callback = function(v) fovenabled = v end })
+    TabAimbot:Toggle({
+        Title = T("showFov"), Value = false,
+        Callback = function(v)
+            showfov = v
+            if v then
+                if not fovgui then
+                    fovgui = Instance.new("ScreenGui"); fovgui.Name="FOVCircle"; fovgui.IgnoreGuiInset=true; fovgui.Parent=game:GetService("CoreGui")
+                    fovframe = Instance.new("Frame"); fovframe.AnchorPoint=Vector2.new(0.5,0.5); fovframe.Position=UDim2.new(0.5,0,0.5,0)
+                    fovframe.BackgroundTransparency=1; fovframe.BorderSizePixel=0; fovframe.Parent=fovgui
+                    local c=Instance.new("UICorner"); c.CornerRadius=UDim.new(1,0); c.Parent=fovframe
+                    fovstroke=Instance.new("UIStroke"); fovstroke.Thickness=fovstrokethickness; fovstroke.Parent=fovframe
+                end
+                fovframe.Size=UDim2.new(0,fovsize,0,fovsize); fovframe.Visible=true
+            else
+                if fovframe then fovframe.Visible=false end
+            end
+        end
+    })
+    TabAimbot:Slider({ Title = T("fovSize"), Min = 1, Max = 750, Value = 100, Callback = function(v) fovsize=v if fovframe then fovframe.Size=UDim2.new(0,v,0,v) end end })
+    TabAimbot:ColorPicker({ Title = T("fovColor"), Value = Color3.fromRGB(255,255,255), Callback = function(v) fovcolor=v end })
+    TabAimbot:Toggle({ Title = T("rainbowFov"), Value = false, Callback = function(v) rainbowfov=v end })
+
+    -- ══════════════════════════════════════════════════
+    --                 TAB: MOVEMENT
+    -- ══════════════════════════════════════════════════
+    TabMovement:Slider({
+        Title = T("walkspeed"), Min = 16, Max = 100, Value = 16,
+        Callback = function(v) currentwalkspeed = v end
+    })
+    TabMovement:Toggle({
+        Title = T("noVelocity"), Value = false,
+        Callback = function(v) noVelocityEnabled = v toggleNoVelocity() end
+    })
+    TabMovement:Divider({ Title = "" })
+    TabMovement:Toggle({
+        Title = T("bunnyHop"), Value = false,
+        Callback = function(v) bunnyHopEnabled = v toggleBunnyHop() end
+    })
+    TabMovement:Slider({ Title = T("bunnyDelay"), Min = 0, Max = 5, Value = 1, Callback = function(v) bunnyHopDelay = v end })
+    TabMovement:Divider({ Title = "" })
+    TabMovement:Toggle({
+        Title = T("xray"), Value = false,
+        Callback = function(v)
+            xrayenabled = v
+            if v then
+                for _, obj in pairs(workspace:GetDescendants()) do
+                    if obj:IsA("BasePart") and not obj:IsDescendantOf(LocalPlayer.Character) then
+                        originaltransparencies[obj] = obj.Transparency
+                        obj.Transparency = xraytransparency
+                    end
+                end
+            else
+                for obj, t in pairs(originaltransparencies) do if obj and obj.Parent then obj.Transparency = t end end
+                originaltransparencies = {}
+            end
+        end
+    })
+    TabMovement:Slider({
+        Title = T("xrayTrans"), Min = 0, Max = 100, Value = 60,
+        Callback = function(v)
+            xraytransparency = v/100
+            if xrayenabled then
+                for _, obj in pairs(workspace:GetDescendants()) do
+                    if obj:IsA("BasePart") and not obj:IsDescendantOf(LocalPlayer.Character) and originaltransparencies[obj] then
+                        obj.Transparency = v/100
+                    end
+                end
+            end
+        end
+    })
+    TabMovement:Divider({ Title = "" })
+    TabMovement:Toggle({
+        Title = T("autoRespawn"), Value = false,
+        Callback = function(v)
+            autoRespawnEnabled = v
+            if v then
+                task.spawn(function()
+                    while autoRespawnEnabled do
+                        if not workspace:FindFirstChild(LocalPlayer.Name) then
+                            if tick() - autoRespawnLastFire >= 1 then
+                                if CommandRemote then CommandRemote:FireServer("Play") end
+                                autoRespawnLastFire = tick()
+                            end
+                        end
+                        task.wait(autoRespawnDelay)
+                    end
+                end)
+            end
+        end
+    })
+    TabMovement:Slider({ Title = T("autoRespawnDelay"), Min = 0, Max = 3, Value = 0, Callback = function(v) autoRespawnDelay = v end })
+    TabMovement:Button({
+        Title = T("joinLobby"), Icon = "home",
+        Callback = function() if CommandRemote then CommandRemote:FireServer("Lobby") end end
+    })
+    TabMovement:Button({
+        Title = T("joinPlay"), Icon = "play",
+        Callback = function() if CommandRemote then CommandRemote:FireServer("Play") end end
+    })
+
+    -- ══════════════════════════════════════════════════
+    --                 TAB: VISUALS
+    -- ══════════════════════════════════════════════════
+    TabVisuals:Slider({ Title = T("camFov"), Min = 60, Max = 120, Value = 70, Callback = function(v) Camera.FieldOfView = v end })
+    TabVisuals:Toggle({
+        Title = T("fullBright"), Value = false,
+        Callback = function(v)
+            if v then
+                game.Lighting.Brightness = 2
+                game.Lighting.Ambient = Color3.fromRGB(255,255,255)
+                game.Lighting.OutdoorAmbient = Color3.fromRGB(255,255,255)
+            else
+                game.Lighting.Brightness = originallighting.Brightness
+                game.Lighting.Ambient = originallighting.Ambient
+                game.Lighting.OutdoorAmbient = originallighting.OutdoorAmbient
+            end
+        end
+    })
+    TabVisuals:Toggle({
+        Title = T("noFog"), Value = false,
+        Callback = function(v)
+            if v then game.Lighting.FogEnd=100000; game.Lighting.FogStart=0
+            else game.Lighting.FogEnd=originallighting.FogEnd; game.Lighting.FogStart=originallighting.FogStart end
+        end
+    })
+
+    -- ══════════════════════════════════════════════════
+    --                TAB: FEATURES
+    -- ══════════════════════════════════════════════════
+    TabFeatures:Toggle({
+        Title = T("knifeSwitch"), Value = false,
+        Callback = function(v) knifeCloseEnabled = v toggleKnifeSwitch() end
+    })
+    TabFeatures:Slider({ Title = T("knifeRange"), Min = 1, Max = 50, Value = 10, Callback = function(v) knifeRange=v updateKnifeRangeSphere() end })
+    TabFeatures:Toggle({ Title = T("showRange"), Value = false, Callback = function(v) showKnifeRange=v updateKnifeRangeSphere() end })
+    TabFeatures:Divider({ Title = "" })
+
+    TabFeatures:Slider({ Title = T("knifeCrates"), Min = 0, Max = 25, Value = 0, Callback = function(v) knifeCrateCount = math.floor(v) end })
+    TabFeatures:Button({
+        Title = T("openKnifeCrates"), Icon = "package",
+        Callback = function() openKnifeCrates() WindUI:Notify({ Title = T("notification"), Content = "✅", Duration = 2 }) end
+    })
+    TabFeatures:Slider({ Title = T("gunCrates"), Min = 0, Max = 15, Value = 0, Callback = function(v) gunCrateCount = math.floor(v) end })
+    TabFeatures:Button({
+        Title = T("openGunCrates"), Icon = "package",
+        Callback = function() openGunCrates() WindUI:Notify({ Title = T("notification"), Content = "✅", Duration = 2 }) end
+    })
+    TabFeatures:Divider({ Title = "" })
+
+    TabFeatures:Toggle({
+        Title = T("rgbGunKnife"), Value = false,
+        Callback = function(v) rgbGunKnifeEnabled = v toggleRGBGunKnife() end
+    })
+    TabFeatures:Dropdown({
+        Title  = T("rgbType"),
+        Values = { "Material", "Highlight" },
+        Value  = "Material",
+        Callback = function(v) rgbType = v end
+    })
+    TabFeatures:Slider({ Title = T("rgbSpeed"), Min = 1, Max = 50, Value = 10, Callback = function(v) rgbSpeed = v end })
+    TabFeatures:Divider({ Title = "" })
+
+    TabFeatures:Input({
+        Title = T("hitSfxId"), Value = "",
+        Callback = function(v) hitSfxId = v:gsub("rbxassetid://","") end
+    })
+    TabFeatures:Input({
+        Title = T("critSfxId"), Value = "",
+        Callback = function(v) critSfxId = v:gsub("rbxassetid://","") end
+    })
+    TabFeatures:Toggle({
+        Title = T("autoApplySfx"), Value = false,
+        Callback = function(v) autoApplySfx = v toggleAutoApplySFX() end
+    })
+
+    -- ══════════════════════════════════════════════════
+    --                TAB: SETTINGS
+    -- ══════════════════════════════════════════════════
+    TabSettings:Button({
+        Title = T("joinDiscord"), Icon = "message-circle",
+        Callback = function()
+            setclipboard("https://discord.gg/uRtbxxxrau")
+            WindUI:Notify({ Title = T("linkCopied"), Content = T("linkCopiedContent"), Duration = 3 })
+        end
+    })
+    TabSettings:Divider({ Title = "" })
+    TabSettings:Dropdown({
+        Title  = T("selectTheme"),
+        Values = { "داكن 🌙", "فاتح ☀️", "وردي 🌸", "نباتي 🌿", "أحمر 🔴", "نيلي 🔵", "سماوي ☁️", "بنفسجي 🟣", "زمردي 💚", "منتصف الليل 🌙", "قرمزي 🩸" },
+        Value  = "نيلي 🔵",
+        Callback = function(val)
+            local map = {
+                ["داكن 🌙"]="Dark",["فاتح ☀️"]="Light",["وردي 🌸"]="Rose",["نباتي 🌿"]="Plant",
+                ["أحمر 🔴"]="Red",["نيلي 🔵"]="Indigo",["سماوي ☁️"]="Sky",["بنفسجي 🟣"]="Violet",
+                ["زمردي 💚"]="Emerald",["منتصف الليل 🌙"]="Midnight",["قرمزي 🩸"]="Crimson"
+            }
+            WindUI:SetTheme(map[val] or "Indigo")
+        end
+    })
+    TabSettings:Divider({ Title = "" })
+    TabSettings:Button({
+        Title = T("changeLanguage"), Icon = "globe",
+        Callback = function()
+            WindUI:Notify({ Title = T("notification"), Content = T("languageChanged"), Duration = 2 })
+            _G.SelectedLanguage = _G.SelectedLanguage == "Arabic" and "English" or "Arabic"
+            Window:Destroy(); cleanupGUI()
+            task.wait(0.5); createMainScript()
+        end
+    })
+    TabSettings:Divider({ Title = "" })
+    TabSettings:Button({
+        Title = T("closeScript"), Icon = "power",
+        Callback = function()
+            Window:Destroy(); cleanupGUI()
+            WindUI:Notify({ Title = T("notification"), Content = T("scriptClosed"), Duration = 2 })
+        end
+    })
+    TabSettings:Divider({ Title = "" })
+    TabSettings:Button({ Title = T("version"), Icon = "tag", Callback = function() end })
+
+    -- Welcome notify
+    task.wait(1)
+    WindUI:Notify({
+        Title   = T("welcome"),
+        Content = _G.SelectedLanguage == "Arabic" and "السكربت شغّال جاهز للاستخدام 🚀" or "Script is running and ready! 🚀",
+        Duration = 6
+    })
+end
+
+-- ══════════════════════════════════════════════════════
+--               LANGUAGE SELECTION POPUP
+-- ══════════════════════════════════════════════════════
+WindUI:Popup({
+    Title   = "🌍 Select Language / اختر اللغة",
+    Icon    = "globe",
+    Content = "Choose your preferred language:\n\nاختار لغتك المفضلة:",
+    Buttons = {
+        {
+            Title    = "English 🇺🇸",
+            Icon     = "flag",
+            Variant  = "Primary",
+            Callback = function()
+                _G.SelectedLanguage = "English"
+                WindUI:Notify({ Title = "✅ Language Selected", Content = "English selected", Duration = 2 })
+                task.wait(0.5); createMainScript()
+            end
+        },
+        {
+            Title    = "العربية 🇸🇦",
+            Icon     = "flag",
+            Variant  = "Secondary",
+            Callback = function()
+                _G.SelectedLanguage = "Arabic"
+                WindUI:Notify({ Title = "✅ تم الاختيار", Content = "تم اختيار اللغة العربية", Duration = 2 })
+                task.wait(0.5); createMainScript()
+            end
+        }
+    }
+})
+
+print("PhantomXPro Flick - Done")
